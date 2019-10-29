@@ -1,0 +1,85 @@
+---
+- name: Create extra components
+  gather_facts: true
+  hosts: swarm-leader
+  vars_files:
+    - infra_vars.yaml
+  environment:
+    DOMAIN: "{{ lookup('env','DOMAIN') }}"
+  tasks:      
+    - name: Wait 600 seconds for target connection to become reachable/usable
+      wait_for_connection:
+
+    - name: Copy compose files
+      copy:
+        src:  "{{ item.src }}"
+        dest: "{{ item.dest }}"
+      with_items:
+        - { src: "../stacks/extras/jenkins/jenkins.yml", dest: "jenkins.yml"}
+        - { src: "../stacks/extras/tomcat/tomcat7.yml", dest: "tomcat7.yml"}
+        
+    - name: Create shared folders for Tomcat
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ swarm_user }}"
+        group: "{{ swarm_user }}"
+      become: true
+      with_items:
+        - "/mnt/efs/tomcat"
+        - "/mnt/efs/tomcat/webapps"
+        - "/mnt/efs/logs/tomcat"
+        
+    - name: Create shared folders for Jenkins
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ swarm_user }}"
+        group: "{{ swarm_user }}"
+      become: true
+      with_items:
+        - "/mnt/efs/jenkins"
+        - "/mnt/efs/logs/jenkins"
+
+    - name: Create Jenkins configs
+      docker_config:
+        name: "{{ item.name }}"
+        data: "{{ lookup('file', '{{ item.src }}') | b64encode }}"
+        data_is_b64: true
+        state: present
+      with_items:
+        - { name: "jenkins-security-conf", src: "../stacks/extras/jenkins/configs/security.groovy" }
+        - { name: "jenkins-plugins", src: "../stacks/extras/jenkins/configs/plugins.txt" }
+        
+    - name: Copy Tomcat extra libs
+      copy:
+        src:  "{{ item.src }}"
+        dest: "{{ item.dest }}"
+      with_items:
+        - { src: "../stacks/extras/tomcat/configs/libs", dest: "/mnt/efs/tomcat/" }
+        
+    - name: Deploy Jenkins stack from compose file
+      docker_stack:
+        state: present
+        name: jenkins
+        compose:
+          - jenkins.yml
+          - version: '3.3'
+            services:
+              jenkins:
+                extra_hosts:
+                  - "mgt.ei.{{ lookup('env','DOMAIN') }}:{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+                  - "ei.{{ lookup('env','DOMAIN') }}:{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+                  - "bps.{{ lookup('env','DOMAIN') }}:{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+                  - "gw.api.{{ lookup('env','DOMAIN') }}:{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+                  - "api.{{ lookup('env','DOMAIN') }}:{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+                environment:
+                  DOMAIN: "{{ lookup('env','DOMAIN') }}"
+                  
+    - name: Deploy Tomcat7 stack from compose file
+      docker_stack:
+        state: present
+        name: tomcat7
+        compose:
+          - tomcat7.yml
+      

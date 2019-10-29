@@ -1,0 +1,97 @@
+---
+- name: Mount shared volume  
+  gather_facts: False
+  hosts: all
+  vars_files:
+    - ../infra_vars.yaml
+  tasks:
+    - name: Create shared folders
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ swarm_user }}"
+        group: "{{ swarm_user }}"
+      with_items:
+        - "/mnt/efs/"
+      become: true
+      
+    - file:
+        path: /mnt/efs/
+        owner: "{{ swarm_user }}"
+        group: "{{ swarm_user }}"
+        mode: 0744
+      become: true
+        
+    - name: Mount NFS shared volume
+      mount:
+        fstype: nfs
+        opts: "nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+        dump: 0
+        passno: 0
+        state: mounted
+        src: "{{ nfs_path }}"
+        path: "/mnt/efs/"
+      become: true
+    
+- name: Create platform - commons tools 
+  gather_facts: False
+  hosts: swarm-leader
+  environment:
+    DOMAIN: "{{ lookup('env','DOMAIN') }}"
+
+  tasks:      
+    - name: Wait 600 seconds for target connection to become reachable/usable
+      wait_for_connection:
+
+    - name: Copy compose files
+      copy:
+        src:  "{{ item.src }}"
+        dest: "{{ item.dest }}"
+      with_items:
+        - { src: "../../stacks/traefik/traefik.yml", dest: "traefik.yml"}
+        - { src: "../../stacks/portainer/portainer.yml", dest: "portainer.yml"}
+
+    - name: Create common configs
+      docker_config:
+        name: "{{ item.name }}"
+        data: "{{ lookup('file', '{{ item.src }}') | b64encode }}"
+        data_is_b64: true
+        state: present
+      with_items:
+        - { name: "domain-crt", src: "../../stacks/traefik/configs/traefik.crt" }
+        - { name: "domain-key", src: "../../stacks/traefik/configs/traefik.key" }
+        - { name: "traefik-conf", src: "../../stacks/traefik/configs/traefik.toml" }
+
+    - name: Create secret admin-user
+      docker_secret:
+        name: admin-user
+        data: admin
+        state: present
+        
+    - name: Create secret admin-pass
+      docker_secret:
+        name: admin-pass
+        data: admin
+        state: present
+   
+    - name: Create platform network
+      docker_network:
+        name: swarm-net
+        driver: overlay
+        ipam_config:
+          - subnet: 192.168.1.0/24
+          
+    - name: Deploy Traefik stack from compose file
+      docker_stack:
+        state: present
+        name: traefik
+        compose:
+          - traefik.yml
+    
+    - name: Deploy Portainer stack from compose file
+      docker_stack:
+        state: present
+        name: portainer
+        compose:
+          - portainer.yml
+      

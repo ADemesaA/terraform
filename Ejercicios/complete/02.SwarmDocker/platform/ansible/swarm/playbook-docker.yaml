@@ -1,0 +1,165 @@
+---
+- name: Install docker
+  gather_facts: true
+  vars_files:
+    - ../infra_vars.yaml
+  hosts: all
+  tasks:      
+    - name: Wait 600 seconds for target connection to become reachable/usable
+      wait_for_connection:
+
+    - name: Install yum utils
+      yum:
+        name: yum-utils
+        state: latest
+      become: yes
+
+    - name: Install device-mapper-persistent-data
+      yum:
+        name: device-mapper-persistent-data
+        state: latest
+      become: yes
+
+    - name: Install lvm2
+      yum:
+        name: lvm2
+        state: latest
+      become: yes
+
+    - name: Install Docker
+      package:
+        name: docker
+        state: latest
+      become: yes
+      when: ansible_facts['system_vendor'] == "Amazon EC2"
+
+    - name: Install Docker
+      package:
+        name: docker-ce
+        state: latest
+      become: yes
+      when: ansible_facts['product_name'] == "VirtualBox"
+           
+    - name: Install PIP
+      package:
+        name: python2-pip
+        state: latest
+      become: yes
+      when: ansible_facts['system_vendor'] == "Amazon EC2"   
+        
+    - name: Install PIP
+      package:
+        name: "{{ item }}"
+        state: latest
+      become: yes
+      when: ansible_facts['product_name'] == "VirtualBox"
+      with_items: 
+         - epel-release 
+         - python-pip
+         - python-yaml
+      
+    - name: Install dependent python modules
+      pip:
+        name: ['docker']
+        state: present
+      become: yes
+      
+    - name: Replace limits in /etc/sysconfig/docker
+      shell: sed -i 's/1024/65535/g' /etc/sysconfig/docker
+      become: yes
+      when: ansible_facts['system_vendor'] == "Amazon EC2"
+      
+    - name: Replace limits in /etc/sysconfig/docker
+      shell: sed -i 's/4096/65535/g' /etc/sysconfig/docker
+      become: yes
+      when: ansible_facts['system_vendor'] == "Amazon EC2"
+        
+    - name: Update limits in /etc/security/limits.conf
+      become: yes
+      lineinfile:
+        dest: /etc/security/limits.conf
+        line: "{{ item }}"
+      with_items:
+        - "*         hard    nofile      500000"
+        - "*         soft    nofile      500000"
+        - "root      hard    nofile      500000"
+        - "root      soft    nofile      500000"
+        
+    - name: Create so groups
+      group:
+        name: "{{ item.group }}"
+        state: present
+        gid:  "{{ item.gid }}" 
+      become: yes
+      with_items:
+        - { group: "wso2usr", gid: "1001"}
+        - { group: "jenkins", gid: "1002"}
+        - { group: "mysql", gid: "1003"}
+        
+    - name: Add users
+      user:
+        name: "{{ item.user }}"
+        uid: "{{ item.uid }}"
+        group: "{{ item.user }}"
+      become: yes
+      with_items:
+        - { user: "wso2usr", uid: "1001"}
+        - { user: "jenkins", uid: "1002"}
+        - { user: "mysql", uid: "1003"}
+    
+    - name: Add users to docker group
+      user:
+        name: "{{ item }}"
+        groups: docker
+        append: yes
+      become: yes
+      register: user_task
+      with_items:
+        - "{{ swarm_user }}"
+        - "wso2usr"
+        - "jenkins"
+
+    - name: reset ssh connection
+      meta: reset_connection
+      become: true
+        
+    - name: Start Docker service
+      service:
+        name: docker
+        state: restarted
+        enabled: yes
+      become: yes
+      
+- name: Install extra packages 
+  gather_facts: False
+  hosts: swarm-leader
+  tasks:     
+    - name: Install PIP
+      package:
+        name: python2-pip
+        state: latest
+      become: yes
+      when: ansible_facts['system_vendor'] == "Amazon EC2"
+
+    - name: Install PIP
+      package:
+        name: "{{item}}"
+        state: latest
+      become: yes
+      when: ansible_facts['product_name'] == "VirtualBox"
+      with_items: 
+         - epel-release 
+         - python-pip
+         - python-yaml
+
+    - name: Install dependent python modules
+      pip:
+        name: ['jsondiff', 'PyMySQL']
+        state: present
+      become: yes
+
+    - name: Install mysql client
+      yum:
+        name: mysql
+        state: latest
+      become: yes

@@ -1,0 +1,48 @@
+version: '3.3'
+
+services:
+  jenkins:
+    image: chakraymx/jenkins-docker:latest
+    volumes:
+      - /mnt/efs/jenkins:/var/jenkins_home
+      - /mnt/efs/logs/jenkins:/var/log/jenkins
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - 'mgt.ei.${DOMAIN}:${LB_IP}'
+      - 'ei.${DOMAIN}:${LB_IP}'
+      - 'api.${DOMAIN}:${LB_IP}'
+      - 'gw.api.${DOMAIN}:${LB_IP}'
+      - 'bps.${DOMAIN}:${LB_IP}'
+    environment:
+      - DOMAIN=${DOMAIN}
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false -Djava.util.logging.config.file=/var/jenkins_home/log.properties
+    secrets:
+      - admin-user
+      - admin-pass
+    configs:
+      - source: jenkins-security-conf
+        target: /usr/share/jenkins/ref/init.groovy.d/security.groovy
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.frontend.rule=Host:jenkins.${DOMAIN}
+        - traefik.port=8080
+        - traefik.frontend.entryPoints=http
+    networks:
+      - swarm-net
+configs:
+  jenkins-security-conf:
+    external: true
+  jenkins-plugins:
+    external: true
+networks:
+  swarm-net:
+    external: true
+secrets:
+  admin-user:
+    external: true
+  admin-pass:
+    external: true

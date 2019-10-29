@@ -1,0 +1,23 @@
+version: '3.3'
+
+services:
+  tomcat:
+    image: chakraymx/tomcat:7
+    volumes:
+      - /mnt/efs/tomcat/webapps/:/usr/local/tomcat/webapps/
+      - /mnt/efs/logs/tomcat/:/usr/local/tomcat/logs/
+      - /mnt/efs/tomcat/libs/:/usr/local/tomcat/libs/
+    deploy:
+      mode: replicated
+      replicas: 3
+      placement:
+        constraints: [node.role != manager]
+      labels:
+        - traefik.frontend.rule=Host:tomcat.${DOMAIN?Variable DOMAIN not set}
+        - traefik.port=8080
+        - traefik.frontend.entryPoints=http
+    networks:
+      - swarm-net 
+networks:
+  swarm-net:
+    external: true
